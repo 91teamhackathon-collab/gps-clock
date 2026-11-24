@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GPS is a clock problem</title>
+<meta name="description" content="Interactive: your phone finds you by timing satellite signals, but its clock is cheap. See how GPS fixes that.">
+<style>
+  :root{--bg:#0b1020;--panel:#131a2e;--line:#243052;--text:#e8ecf8;--mut:#93a0c4;--good:#5be3a0;--bad:#ff6b7a;--acc:#4fc3f7}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+  h1{margin:0 0 6px;font-size:clamp(26px,4vw,38px);letter-spacing:-.02em}
+  .lede{margin:0 0 18px;color:var(--mut);max-width:62ch;font-size:17px}
+  .lede b{color:var(--text)}
+  .grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:16px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  canvas{display:block;width:100%;aspect-ratio:1000/640;touch-action:none;cursor:grab}
+  canvas.drag{cursor:grabbing}
+  .insight{padding:14px 16px;border-top:1px solid var(--line);font-size:17px;min-height:96px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .panel h2{margin:0 0 10px;font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
+  .panel + .panel{margin-top:16px}
+  ol.steps{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+  ol.steps li{display:flex;gap:10px;align-items:center}
+  .num{flex:none;width:24px;height:24px;border-radius:50%;background:var(--line);display:grid;place-items:center;font-size:13px;font-weight:700}
+  button{font:inherit;color:var(--text);background:#1c2646;border:1px solid var(--line);border-radius:10px;padding:8px 12px;cursor:pointer}
+  button:hover{background:#243060}
+  button:focus-visible,input:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+  ol.steps button{text-align:left;flex:1}
+  label{display:block;font-size:14px;color:var(--mut);margin:12px 0 4px}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .val{color:var(--text);font-weight:600;font-variant-numeric:tabular-nums}
+  .sub{font-size:13px;color:var(--mut)}
+  input[type=range]{width:100%;accent-color:var(--acc)}
+  .seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .seg button[aria-pressed=true]{background:var(--acc);color:#04202e;border-color:var(--acc);font-weight:700}
+  .counter{display:flex;align-items:center;gap:10px}
+  .counter button{width:38px;padding:6px 0;font-size:18px}
+  .stats{display:grid;gap:8px;margin:0}
+  .stats div{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dashed var(--line);padding-bottom:6px}
+  .stats dt{color:var(--mut);font-size:14px}
+  .stats dd{margin:0;font-weight:700;font-variant-numeric:tabular-nums;text-align:right}
+  .good{color:var(--good)} .bad{color:var(--bad)}
+  details{margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px 16px}
+  summary{cursor:pointer;padding:12px 0;font-weight:700}
+  details .body{padding:0 0 14px;color:#cfd7ee;max-width:80ch}
+  details code{background:#1c2646;padding:1px 6px;border-radius:6px}
+  details h3{margin:16px 0 4px;font-size:16px}
+  .tiny{margin-top:14px;font-size:13px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GPS is a clock problem</h1>
+  <p class="lede">Your phone finds you by timing radio signals from satellites. Each timing becomes a circle: <b>"I'm this far from satellite S."</b> The catch: your phone's clock is cheap. Slide the clock error and watch what happens to the circles.</p>
+
+  <div class="grid">
+    <section class="stage" aria-label="Interactive map">
+      <canvas id="cv" aria-label="Map showing satellites, range circles and your position"></canvas>
+      <div class="insight" id="insight"></div>
+    </section>
+
+    <aside>
+      <div class="panel">
+        <h2>Try this, in order</h2>
+        <ol class="steps">
+          <li><span class="num">1</span><button data-step="1">Make the phone's clock 0.8 ms off</button></li>
+          <li><span class="num">2</span><button data-step="2">Let the receiver solve for its clock</button></li>
+          <li><span class="num">3</span><button data-step="3">Remove satellites down to 2</button></li>
+        </ol>
+        <p class="tiny" style="margin-bottom:0">Then drag the white dot or any satellite.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Controls</h2>
+        <div class="row"><label for="clock" style="margin:0">Your phone's clock error</label><span class="val" id="clockVal"></span></div>
+        <input id="clock" type="range" min="-1000" max="1000" step="1" value="600">
+        <div class="sub" id="clockKm"></div>
+
+        <label>What the receiver assumes</label>
+        <div class="seg">
+          <button id="mTrust" aria-pressed="true">Trust my clock</button>
+          <button id="mSolve" aria-pressed="false">Solve for my clock</button>
+        </div>
+
+        <label>Satellites in view</label>
+        <div class="counter">
+          <button id="nMinus" aria-label="Fewer satellites">&minus;</button>
+          <span class="val" id="nVal"></span>
+          <button id="nPlus" aria-label="More satellites">+</button>
+        </div>
+
+        <div class="row"><label for="noise" style="margin:12px 0 4px">Timing noise</label><span class="val" id="noiseVal"></span></div>
+        <input id="noise" type="range" min="0" max="60" step="1" value="0">
+        <button id="reroll" style="margin-top:8px">Re-roll noise</button>
+      </div>
+
+      <div class="panel">
+        <h2>Result</h2>
+        <dl class="stats">
+          <div><dt>Position error</dt><dd id="errVal"></dd></div>
+          <div><dt>Receiver thinks its clock is off by</dt><dd id="clockEst"></dd></div>
+          <div><dt>Satellite geometry (HDOP, lower is better)</dt><dd id="dopVal"></dd></div>
+        </dl>
+        <p class="tiny" style="margin-bottom:0"><button id="reset" style="padding:4px 10px;font-size:13px">Reset everything</button></p>
+      </div>
+    </aside>
+  </div>
+
+  <details>
+    <summary>Go deeper: the maths, why 4 in real life, and what breaks it</summary>
+    <div class="body">
+      <h3>What the receiver actually measures</h3>
+      <p>A satellite broadcasts its position and the moment it transmitted. The receiver subtracts that moment from its own clock reading at arrival and multiplies by the speed of light. Call that <code>&rho;<sub>i</sub> = |p &minus; s<sub>i</sub>| + c&middot;b</code>, where <code>p</code> is where you are and <code>b</code> is your clock's error. Light covers about 300 km per millisecond, so a quartz clock that is off by one millisecond shifts <em>every</em> circle by 300 km.</p>
+      <h3>Why the clock becomes an unknown</h3>
+      <p>Because the clock error shifts every circle by the same amount, it can be treated as one more unknown, solved at the same time as position. This page does exactly that with Levenberg&ndash;Marquardt least squares, in <code>solver.js</code>. In 2D the unknowns are x, y and b, so you need 3 satellites. Real GPS solves in 3D (x, y, z, b), so it needs <strong>4</strong>.</p>
+      <h3>Why not just build a better clock?</h3>
+      <p>The satellites carry atomic clocks; your phone would cost far more with one. Instead, one extra satellite buys you atomic-clock accuracy for the price of a quartz crystal.</p>
+      <h3>Geometry matters (HDOP)</h3>
+      <p>Add timing noise, then drag the satellites close together. The circles cross at shallow angles, the intersection smears out, and HDOP climbs. The same noise now costs you far more position error.</p>
+      <h3>One more thing</h3>
+      <p>Satellite clocks run fast by about 38 microseconds a day compared with clocks on the ground (gravity slows ground clocks more than orbital speed slows satellite clocks). Uncorrected, that is roughly 11 km of drift per day, which is why the satellite clocks are deliberately tuned.</p>
+      <p class="tiny">Toy scale: the map is about 3,000 km wide and the satellites are drawn close so the circles fit. Real GPS satellites orbit around 20,000 km up. The mechanism, however, is the real one. Everything on this page is computed live by the code in this page and solver.js; there are no prerecorded animations and no network calls.</p>
+    </div>
+  </details>
+</div>
+
+<script src="solver.js"></script>
+<script>
+(function () {
+  'use strict';
+  var W = 1000, H = 640, KM_PER_PX = 3;
+  var KM_PER_US = GPSSolver.C_KM_PER_US;
+  var PX_PER_US = KM_PER_US / KM_PER_PX;
+  var COLORS = ['#4fc3f7', '#ffb74d', '#ba68c8', '#81c784', '#f06292', '#fff176'];
+  var SAT0 = [{x:130,y:100},{x:870,y:130},{x:700,y:590},{x:170,y:540},{x:500,y:55},{x:930,y:420}];
+  var RECV0 = {x:480, y:360};
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cv = $('cv'), ctx = cv.getContext('2d');
+
+  var S = {
+    sats: SAT0.map(function (s) { return {x:s.x, y:s.y}; }),
+    recv: {x:RECV0.x, y:RECV0.y},
+    n: 5, clockUs: 600, noiseKm: 0, mode: 'trust',
+    unit: [], shownB: 0, est: {x:RECV0.x, y:RECV0.y}
+  };
+  function rollNoise() { S.unit = []; for (var i = 0; i < 6; i++) S.unit.push((Math.random() + Math.random() + Math.random() - 1.5) / 0.75); }
+  rollNoise();
+
+  // ---------- sizing ----------
+  function resize() {
+    var dpr = window.devicePixelRatio || 1, w = cv.clientWidth;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(w * H / W * dpr);
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // ---------- model (all computed here from the inputs) ----------
+  function compute() {
+    var sats = S.sats.slice(0, S.n), b = S.clockUs * PX_PER_US;
+    var rho = sats.map(function (s, i) {
+      return Math.hypot(s.x - S.recv.x, s.y - S.recv.y) + b + S.unit[i] * S.noiseKm / KM_PER_PX;
+    });
+    return { sats: sats, rho: rho, b: b,
+      trust: GPSSolver.solve(sats, rho, false),
+      full: GPSSolver.solve(sats, rho, true) };
+  }
+
+  // ---------- drawing ----------
+  function draw(R, active) {
+    var k = cv.width / W;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    var g = ctx.createRadialGradient(W/2, H/2, 40, W/2, H/2, W*0.7);
+    g.addColorStop(0, '#15204a'); g.addColorStop(1, '#0a0f20');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = 'rgba(120,140,200,.08)'; ctx.lineWidth = 1;
+    for (var x = 0; x <= W; x += 100) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+    for (var y = 0; y <= H; y += 100) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+
+    // range circles: radius = what the receiver believes, minus the clock correction it has applied
+    R.sats.forEach(function (s, i) {
+      var r = Math.max(0, R.rho[i] - S.shownB), c = COLORS[i];
+      ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = hexA(c, .05); ctx.fill();
+      ctx.strokeStyle = hexA(c, .9); ctx.lineWidth = 2.5; ctx.stroke();
+    });
+
+    // true signal paths
+    ctx.setLineDash([4, 6]); ctx.lineWidth = 1;
+    R.sats.forEach(function (s, i) {
+      ctx.strokeStyle = hexA(COLORS[i], .35);
+      ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(S.recv.x, S.recv.y); ctx.stroke();
+    });
+    ctx.setLineDash([]);
+
+    // satellites
+    ctx.font = '600 15px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    R.sats.forEach(function (s, i) {
+      ctx.fillStyle = '#0b1020'; ctx.strokeStyle = COLORS[i]; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 15, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = COLORS[i]; ctx.fillText('S' + (i + 1), s.x, s.y + 1);
+    });
+
+    // estimate marker + error line
+    if (active.ok) {
+      var ex = S.est.x, ey = S.est.y, col = S.mode === 'solve' ? '#5be3a0' : '#ff6b7a';
+      var dpx = Math.hypot(ex - S.recv.x, ey - S.recv.y);
+      if (dpx > 3) {
+        ctx.setLineDash([6, 5]); ctx.strokeStyle = col; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(S.recv.x, S.recv.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle = col; ctx.font = '700 14px system-ui,sans-serif';
+        ctx.fillText(Math.round(dpx * KM_PER_PX) + ' km off', (ex + S.recv.x) / 2 + 4, (ey + S.recv.y) / 2 - 14);
+      }
+      ctx.strokeStyle = col; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.moveTo(ex - 9, ey - 9); ctx.lineTo(ex + 9, ey + 9); ctx.moveTo(ex + 9, ey - 9); ctx.lineTo(ex - 9, ey + 9); ctx.stroke();
+      ctx.font = '600 13px system-ui,sans-serif'; ctx.fillStyle = col;
+      ctx.fillText(S.mode === 'solve' ? 'receiver\u2019s answer' : 'receiver\u2019s guess', ex, ey + 24);
+    }
+
+    // you
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#04202e'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(S.recv.x, S.recv.y, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = '700 14px system-ui,sans-serif';
+    ctx.fillText('You (true position)', S.recv.x, S.recv.y - 22);
+
+    // scale bar + hint
+    ctx.strokeStyle = '#93a0c4'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(24, H - 26); ctx.lineTo(124, H - 26); ctx.moveTo(24, H - 31); ctx.lineTo(24, H - 21); ctx.moveTo(124, H - 31); ctx.lineTo(124, H - 21); ctx.stroke();
+    ctx.fillStyle = '#93a0c4'; ctx.font = '13px system-ui,sans-serif'; ctx.textAlign = 'left';
+    ctx.fillText(Math.round(100 * KM_PER_PX) + ' km', 132, H - 26);
+    ctx.textAlign = 'right'; ctx.fillText('drag the white dot or any satellite', W - 16, H - 26);
+    ctx.textAlign = 'center';
+  }
+  function hexA(h, a) {
+    var n = parseInt(h.slice(1), 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  // ---------- UI text ----------
+  var cache = {};
+  function setText(id, html) { if (cache[id] !== html) { cache[id] = html; $(id).innerHTML = html; } }
+  function fmtUs(us) { return (Math.round(us * 10) / 10).toLocaleString('en', {maximumFractionDigits: 1}) + ' \u00b5s'; }
+
+  function updateUI(R, active) {
+    var km = KM_PER_US * Math.abs(S.clockUs);
+    var err = active.ok ? Math.hypot(active.x - S.recv.x, active.y - S.recv.y) * KM_PER_PX : null;
+    var n = S.n, txt;
+
+    setText('clockVal', fmtUs(S.clockUs));
+    setText('clockKm', 'Light travels ' + Math.round(km).toLocaleString('en') + ' km in that time');
+    setText('nVal', n + (n === 1 ? ' satellite' : ' satellites'));
+    setText('noiseVal', S.noiseKm + ' km');
+
+    if (S.mode === 'trust') {
+      if (!active.ok) txt = 'With the clock wrong, these two circles do not even touch. The receiver has no position at all.';
+      else if (Math.abs(S.clockUs) < 1) txt = 'Clock perfect: every circle passes through you. Real phone clocks are never this good. Drag the clock slider.';
+      else txt = 'The receiver trusts its clock, so every signal looks <b>' + Math.round(km) + ' km ' + (S.clockUs > 0 ? 'longer' : 'shorter') + '</b> than it really was. The circles stop meeting at one point, and its best compromise lands <b class="bad">' + Math.round(err) + ' km</b> from you.';
+    } else {
+      if (n < 3) txt = 'Three unknowns (your x, your y, <b>your clock</b>) but only ' + n + ' circles. Infinitely many answers fit. This is why GPS needs one more satellite than the dimensions it solves in: <b>4 in real 3D</b>.';
+      else if (!active.ok) txt = 'These satellites sit in a line, so the circles cannot pin you down. Drag one off the line.';
+      else txt = 'The clock is the third unknown. The receiver finds the one amount to shrink every circle by so they all meet at a point. It works out its clock is <b>' + fmtUs(active.b / PX_PER_US) + '</b> off, without ever having a good clock. Position error: <b class="' + (err < 1 ? 'good' : 'bad') + '">' + (err < 10 ? err.toFixed(1) : Math.round(err)) + ' km</b>' + (S.noiseKm > 0 ? ' (what is left is timing noise)' : '') + '.';
+    }
+    setText('insight', txt);
+
+    if (active.ok) {
+      setText('errVal', '<span class="' + (err < 1 ? 'good' : 'bad') + '">' + (err < 10 ? err.toFixed(1) : Math.round(err).toLocaleString('en')) + ' km</span>');
+      setText('dopVal', active.hdop.toFixed(2));
+    } else { setText('errVal', '\u2014'); setText('dopVal', '\u2014'); }
+    setText('clockEst', S.mode === 'solve' && R.full.ok ? fmtUs(R.full.b / PX_PER_US) : 'assumes 0 \u00b5s');
+
+    $('mTrust').setAttribute('aria-pressed', S.mode === 'trust');
+    $('mSolve').setAttribute('aria-pressed', S.mode === 'solve');
+  }
+
+  // ---------- loop ----------
+  function frame() {
+    var R = compute();
+    var active = S.mode === 'solve' ? R.full : R.trust;
+    var targetB = (S.mode === 'solve' && R.full.ok) ? R.full.b : 0;
+    S.shownB += (targetB - S.shownB) * 0.15;
+    if (Math.abs(targetB - S.shownB) < 0.01) S.shownB = targetB;
+    if (active.ok) {
+      S.est.x += (active.x - S.est.x) * 0.25;
+      S.est.y += (active.y - S.est.y) * 0.25;
+    }
+    draw(R, active);
+    updateUI(R, active);
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- controls ----------
+  function tweenClock(to) {
+    var from = S.clockUs, t0 = performance.now();
+    (function step(t) {
+      var p = Math.min(1, (t - t0) / 700);
+      S.clockUs = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)));
+      $('clock').value = S.clockUs;
+      if (p < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+  $('clock').addEventListener('input', function (e) { S.clockUs = +e.target.value; });
+  $('noise').addEventListener('input', function (e) { S.noiseKm = +e.target.value; });
+  $('reroll').addEventListener('click', rollNoise);
+  $('mTrust').addEventListener('click', function () { S.mode = 'trust'; });
+  $('mSolve').addEventListener('click', function () { S.mode = 'solve'; });
+  $('nMinus').addEventListener('click', function () { S.n = Math.max(2, S.n - 1); });
+  $('nPlus').addEventListener('click', function () { S.n = Math.min(6, S.n + 1); });
+  document.querySelectorAll('[data-step]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var s = b.getAttribute('data-step');
+      if (s === '1') { S.mode = 'trust'; tweenClock(800); }
+      if (s === '2') { S.mode = 'solve'; }
+      if (s === '3') { S.n = 2; }
+    });
+  });
+  $('reset').addEventListener('click', function () {
+    S.sats = SAT0.map(function (s) { return {x:s.x, y:s.y}; });
+    S.recv = {x:RECV0.x, y:RECV0.y}; S.n = 5; S.noiseKm = 0; S.mode = 'trust';
+    $('noise').value = 0; tweenClock(600);
+  });
+
+  // dragging
+  var drag = null;
+  function toWorld(e) {
+    var r = cv.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+  }
+  cv.addEventListener('pointerdown', function (e) {
+    var p = toWorld(e), best = null, bd = 30;
+    var cand = [{o: S.recv}].concat(S.sats.slice(0, S.n).map(function (s) { return {o: s}; }));
+    cand.forEach(function (c) { var d = Math.hypot(c.o.x - p.x, c.o.y - p.y); if (d < bd) { bd = d; best = c.o; } });
+    if (best) { drag = best; cv.setPointerCapture(e.pointerId); cv.classList.add('drag'); }
+  });
+  cv.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    var p = toWorld(e);
+    drag.x = Math.min(W - 12, Math.max(12, p.x));
+    drag.y = Math.min(H - 12, Math.max(12, p.y));
+  });
+  function end() { drag = null; cv.classList.remove('drag'); }
+  cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+
+  frame();
+})();
+</script>
+</body>
+</html>
